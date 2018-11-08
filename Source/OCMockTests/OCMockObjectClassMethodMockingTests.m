@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2013-2016 Erik Doernenburg and contributors
+ *  Copyright (c) 2013-2018 Erik Doernenburg and contributors
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may
  *  not use these files except in compliance with the License. You may obtain
@@ -255,6 +255,38 @@ static NSUInteger initializeCallCount = 0;
 
     [mock2 stopMocking];
     XCTAssertNoThrow([TestClassWithClassMethods foo]);
+}
+
+- (void)testStopMockingDisposesMetaClass
+{
+    id mock = [[OCClassMockObject alloc] initWithClass:[TestClassWithClassMethods class]];
+
+    char *createdSubclassName = strdup(object_getClassName([TestClassWithClassMethods class]));
+    XCTAssertNotNil(objc_lookUpClass(createdSubclassName));
+
+    [mock stopMocking];
+    XCTAssertNil(objc_lookUpClass(createdSubclassName));
+    free(createdSubclassName);
+}
+
+- (void)testSecondClassMockDisposesFirstMetaClass
+{
+    id mock1 = [[OCClassMockObject alloc] initWithClass:[TestClassWithClassMethods class]];
+    char *createdSubclassName1 = strdup(object_getClassName([TestClassWithClassMethods class]));
+    XCTAssertNotNil(objc_lookUpClass(createdSubclassName1));
+
+    id mock2 = [[OCClassMockObject alloc] initWithClass:[TestClassWithClassMethods class]];
+    char *createdSubclassName2 = strdup(object_getClassName([TestClassWithClassMethods class]));
+    XCTAssertNotNil(objc_lookUpClass(createdSubclassName2));
+
+    [mock1 stopMocking];
+    [mock2 stopMocking];
+
+    XCTAssertNil(objc_lookUpClass(createdSubclassName1));
+    XCTAssertNil(objc_lookUpClass(createdSubclassName2));
+
+    free(createdSubclassName1);
+    free(createdSubclassName2);
 }
 
 - (void)testForwardToRealObject
