@@ -54,12 +54,14 @@ static NSString *const OCMArgAnyPointerDescription = @"<[OCMArg anyPointer]>";
 
 
 static NSString *const OCMRetainedObjectArgumentsKey = @"OCMRetainedObjectArgumentsKey";
+static NSString *const OCMRetainedStructArgumentsKey = @"OCMRetainedStructArgumentsKey";
 
 - (void)retainObjectArgumentsExcludingObject:(id)objectToExclude
 {
     if(objc_getAssociatedObject(self, OCMRetainedObjectArgumentsKey) != nil)
     {
         // looks like we've retained the arguments already; do nothing else
+        // TODO: (A)
         return;
     }
 
@@ -77,8 +79,10 @@ static NSString *const OCMRetainedObjectArgumentsKey = @"OCMRetainedObjectArgume
     }
 
     NSUInteger numberOfArguments = [[self methodSignature] numberOfArguments];
+    NSMutableArray *retainedStructs = [[NSMutableArray alloc] initWithCapacity:numberOfArguments];
     for(NSUInteger index = 2; index < numberOfArguments; index++)
     {
+        [retainedStructs addObject:[NSNull null]];
         const char *argumentType = [[self methodSignature] getArgumentTypeAtIndex:index];
         if(OCMIsObjectType(argumentType))
         {
@@ -114,11 +118,17 @@ static NSString *const OCMRetainedObjectArgumentsKey = @"OCMRetainedObjectArgume
                     [retainedArguments addObject:argument];
                 }
             }
+        } else if (argumentType[0] == '{') {
+          id argument = [self getStructAtIndexAsNSValue:index];
+          retainedStructs[index - 2] = argument;
+          NSLog(@"%@", retainedStructs);
         }
     }
 
     objc_setAssociatedObject(self, OCMRetainedObjectArgumentsKey, retainedArguments, OBJC_ASSOCIATION_RETAIN);
+    objc_setAssociatedObject(self, OCMRetainedStructArgumentsKey, retainedStructs, OBJC_ASSOCIATION_RETAIN);
     [retainedArguments release];
+    [retainedStructs release];
 }
 
 
@@ -296,17 +306,29 @@ static NSString *const OCMRetainedObjectArgumentsKey = @"OCMRetainedObjectArgume
         }
         case '{': // structure
         {
-            NSUInteger argSize;
-            NSGetSizeAndAlignment([[self methodSignature] getArgumentTypeAtIndex:(NSUInteger)argIndex], &argSize, NULL);
-            if(argSize == 0) // TODO: Can this happen? Is frameLength a good choice in that case?
-                argSize = [[self methodSignature] frameLength];
-            NSMutableData *argumentData = [[[NSMutableData alloc] initWithLength:argSize] autorelease];
-            [self getArgument:[argumentData mutableBytes] atIndex:argIndex];
-            return [NSValue valueWithBytes:[argumentData bytes] objCType:argType];
+          NSArray *retainedStructs = objc_getAssociatedObject(self, OCMRetainedStructArgumentsKey);
+          if(retainedStructs != nil) {
+            if (![retainedStructs[argIndex - 2] isEqual:[NSNull null]]) {
+              return retainedStructs[argIndex - 2];
+            }
+          }
+          return [self getStructAtIndexAsNSValue:argIndex];
         }
     }
     [NSException raise:NSInvalidArgumentException format:@"Argument type '%s' not supported", argType];
     return nil;
+}
+
+
+- (NSValue *)getStructAtIndexAsNSValue:(NSInteger)argIndex {
+  NSUInteger argSize;
+  const char *argType = OCMTypeWithoutQualifiers([[self methodSignature] getArgumentTypeAtIndex:(NSUInteger)argIndex]);
+  NSGetSizeAndAlignment([[self methodSignature] getArgumentTypeAtIndex:(NSUInteger)argIndex], &argSize, NULL);
+  if(argSize == 0) // TODO: Can this happen? Is frameLength a good choice in that case?
+      argSize = [[self methodSignature] frameLength];
+  NSMutableData *argumentData = [[[NSMutableData alloc] initWithLength:argSize] autorelease];
+  [self getArgument:[argumentData mutableBytes] atIndex:argIndex];
+  return [NSValue valueWithBytes:[argumentData bytes] objCType:argType];
 }
 
 
